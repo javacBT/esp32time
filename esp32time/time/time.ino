@@ -264,7 +264,7 @@ void showWeather(){
     setColor(lamps[13][4],153,217,234);
 
     Numbr(tem1,14,2);
-    Numbr(tem1,18,2);
+    Numbr(tem2,18,2);
     
     setColor(lamps[23][2],153,217,234);
     setColor(lamps[24][2],153,217,234);
@@ -287,7 +287,7 @@ void showWeather(){
   }else{
 
     Numbr(tem1,11,2);
-    Numbr(tem1,15,2);
+    Numbr(tem2,15,2);
     
     setColor(lamps[20][2],153,217,234);
     setColor(lamps[21][2],153,217,234);
