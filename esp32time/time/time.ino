@@ -233,7 +233,7 @@ void timeDisplay(){
   int mins = tm_now->tm_min;
 
   //规定时间请求获取天气
-  if(mins==0 && (hour ==22 || hour==18 || hour==12 || hour==4)){
+  if(mins<=1 && (hour ==22 || hour==18 || hour==12 || hour==4)){
 
     httpGet();
   }
