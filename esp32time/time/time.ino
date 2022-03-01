@@ -1,10 +1,16 @@
 #include <WiFi.h>
 #include <WebServer.h>
+#include <EEPROM.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
 
 //热点
 const char* AP_SSID  = "ESP32_Config"; //热点名称
 const char* AP_PASS  = "12345678";  //密码
+
+String ssid = "";
+String pass = "";
 
 #define ROOT_HTML  "<!DOCTYPE html><html><head><title>WIFI Config by lwang</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><style type=\"text/css\">.input{display: block; margin-top: 10px;}.input span{width: 100px; float: left; float: left; height: 36px; line-height: 36px;}.input input{height: 30px;width: 200px;}.btn{width: 120px; height: 35px; background-color: #000000; border:0px; color:#ffffff; margin-top:15px; margin-left:100px;}</style><body><form method=\"GET\" action=\"connect\"><label class=\"input\"><span>WiFi SSID</span><input type=\"text\" name=\"ssid\"></label><label class=\"input\"><span>WiFi PASS</span><input type=\"text\"  name=\"pass\"></label><input class=\"btn\" type=\"submit\" name=\"submit\" value=\"Submie\"></form></body></html>"
 WebServer server(80);
@@ -13,7 +19,7 @@ WebServer server(80);
 
 #define NUMPIXELS 256
 
-#define DELAYVAL 1000 * 60
+#define DELAYVAL 1000 * 30
 
 int lamps[32][8]; //因为8*32灯是蛇形排列 所以要转换一下
 
@@ -23,9 +29,57 @@ const char *ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = 8 * 3600;
 const int daylightOffset_sec = 0;
 
+HTTPClient http;
+DynamicJsonDocument doc(1024);
+
+String wea = ""; //天气
+int tem = 0; //温度
+
 void setup() {
 
-  //初始化led的灯
+  //串口日志绑定
+  Serial.begin(9600);
+
+  //初始化led灯
+  initialization();
+
+  //读取或者保存wifi信息 
+  getwifi();
+
+  //http请求接口 获取天气使用
+  http.begin("http://122.51.51.37:8286/weather/get_weather");
+
+  //连接网络
+  connectWifi(ssid,pass);
+  
+
+}
+
+int showJudge = 1;
+void loop() {
+
+  server.handleClient();
+
+  if (WiFi.status() == WL_CONNECTED) { //WIFI已连接
+
+   if(showJudge==1){
+
+    showWeather();
+    showJudge = 2;
+   }else{
+
+    timeDisplay();
+    showJudge = 1;
+   }
+  
+   delay(DELAYVAL);
+  }
+
+}
+
+//初始化led灯
+void initialization(){
+
     pixels.begin();
 
           for(int x=1;x<=32;x++){
@@ -41,60 +95,131 @@ void setup() {
                 }
             }
         }
+}
 
-  //串口日志绑定
-  Serial.begin(9600);
+//创建热点启动http服务用来设置wifi
+boolean hotspotJudge = false; //是否设置过wifi
+void hotspot(){
 
   //无wifi图标
-  noWifi();
+  noWifilogo();
+
   //创建热点
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID,AP_PASS);
 
   Serial.println(WiFi.softAPIP());
 
-  //首页
+  //192.168.4.1 首页
   server.on("/", []() {
     server.send(200, "text/html", ROOT_HTML);
   });
 
-  //连接
+  //192.168.4.1 设置wifi
   server.on("/connect", [](){
     
     server.send(200, "text/html", "<html><body><h1>successd,conning...</h1></body></html>");
-    WiFi.softAPdisconnect(true);
-    String ssid = server.arg("ssid");
-    String pass = server.arg("pass");
-    Serial.println(ssid);
-    Serial.println(pass);
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid.c_str(), pass.c_str());
-    while (WiFi.status() != WL_CONNECTED) { 
-      delay(1000);
-      Serial.println("连接中");
-    }
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    ssid = server.arg("ssid");
+    pass = server.arg("pass");
+    hotspotJudge = true;
+    connectWifi(ssid,pass);
 
   });
 
   server.begin();
 }
 
-void loop() {
+//连接wifi
+void connectWifi(String ssid,String pass){
 
-  server.handleClient();
+    connectlogo();
 
-  if (WiFi.status() == WL_CONNECTED) { //WIFI已连接
+    int connectWifiIndex = 1;
     
-   timeDisplay();
+    WiFi.softAPdisconnect(true);
+    
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    while (WiFi.status() != WL_CONNECTED) { 
+      delay(1000);
+      connectWifiIndex = connectWifiIndex + 1;
 
-   logo();
-  
-   delay(DELAYVAL);
-  }
+      //等待五秒无网络跳出
+      if(connectWifiIndex==5)break;
+    }
+    
+    if(WiFi.status() == WL_CONNECTED){
 
+      //保存wifi信息 
+      if(hotspotJudge)setwifi();
+      //联网成功后获取一次天气信息
+      httpGet();
+      configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+      
+    }else{
+
+      hotspot();
+    }
 }
 
+//读取wifi等信息 断电保存
+void getwifi(){
+
+  EEPROM.begin(2048);
+
+  ssid=get_string(EEPROM.read(10),15);
+  pass=get_string(EEPROM.read(50),55);
+}
+
+//保存WiFi信息
+void setwifi(){
+
+    set_string(10,15,ssid,1); //保存wifi名称
+    set_string(50,55,pass,1); //保存wifi名称
+}
+
+//用EEPROM的a位保存字符串的长度，字符串的从EEPROM的b位开始保存，str为要保存的字符串，s为是否保存字符串长度
+void set_string(int a,int b,String str,int s)
+{
+  if(s)EEPROM.write(a,str.length()); //EEPROM第a位，写入str字符串的长度
+  //通过一个for循环，把str所有数据，逐个保存在EEPROM
+  for(int i = 0; i < str.length(); i++){
+    EEPROM.write(b + i, str[i]);
+  }
+  EEPROM.commit();  //执行保存EEPROM
+  
+}
+ 
+//获取指定EEPROM位置的字符串，a是字符串长度，b是起始位，从EEPROM的b位开始读取
+String get_string(int a,int b){
+  String data="";
+  //通过一个for循环，从EEPROM中逐个取出每一位的值，并连接起来
+  for(int i=0; i<a; i++){
+    data += char(EEPROM.read(b+i));
+  }
+  return data;
+}
+
+//http请求获取天气
+void httpGet(){
+
+  int httpCode = http.GET();
+
+  if (httpCode > 0){
+
+    String payload = http.getString();
+    doc.clear();
+    deserializeJson(doc,payload);
+    JsonObject obj = doc.as<JsonObject>();
+    String httpWea = obj["wea"];
+    wea = httpWea;
+    tem = (int)obj["tem"];
+    tem = tem%100;
+    
+  }
+
+  http.end();
+}
 
 //获取时间
 void timeDisplay(){
@@ -106,16 +231,220 @@ void timeDisplay(){
   
   int hour = tm_now->tm_hour;
   int mins = tm_now->tm_min;
-  Serial.println(hour);
-  Serial.println(mins);
+
+  //规定时间请求获取天气
+  if(mins==0 && (hour ==22 || hour==18 || hour==12 || hour==4)){
+
+    httpGet();
+  }
 
   pixels.clear();
+  timelogo();
 
   Numbr(hour/10,11,2);
   Numbr(hour%10,15,2);
   Numbr(-1,19,2);
   Numbr(mins/10,21,2);
   Numbr(mins%10,25,2);
+}
+
+//显示温度
+void showWeather(){
+
+  pixels.clear();
+
+  //气温
+  int tem1 = tem/10;
+  int tem2 = tem%10;
+
+  if(tem<0){
+
+    setColor(lamps[11][4],153,217,234);
+    setColor(lamps[12][4],153,217,234);
+    setColor(lamps[13][4],153,217,234);
+
+    Numbr(tem1,14,2);
+    Numbr(tem1,18,2);
+    
+    setColor(lamps[23][2],153,217,234);
+    setColor(lamps[24][2],153,217,234);
+    setColor(lamps[25][2],153,217,234);
+    
+    setColor(lamps[23][3],153,217,234);
+    setColor(lamps[25][3],153,217,234);
+    
+    setColor(lamps[23][4],153,217,234);
+    
+    setColor(lamps[23][5],153,217,234);
+    setColor(lamps[25][5],153,217,234);
+    
+    setColor(lamps[23][6],153,217,234);
+    setColor(lamps[24][6],153,217,234);
+    setColor(lamps[25][6],153,217,234);
+    
+    setColor(lamps[27][2],153,217,234);
+    
+  }else{
+
+    Numbr(tem1,11,2);
+    Numbr(tem1,15,2);
+    
+    setColor(lamps[20][2],153,217,234);
+    setColor(lamps[21][2],153,217,234);
+    setColor(lamps[22][2],153,217,234);
+    
+    setColor(lamps[20][3],153,217,234);
+    setColor(lamps[22][3],153,217,234);
+    
+    setColor(lamps[20][4],153,217,234);
+    
+    setColor(lamps[20][5],153,217,234);
+    setColor(lamps[22][5],153,217,234);
+    
+    setColor(lamps[20][6],153,217,234);
+    setColor(lamps[21][6],153,217,234);
+    setColor(lamps[22][6],153,217,234);
+    
+    setColor(lamps[24][2],153,217,234);
+  }
+
+  //天气
+  if(wea=="雨"){
+
+   setColor(lamps[7][1],195,195,195); 
+   setColor(lamps[8][1],195,195,195); 
+
+   setColor(lamps[3][2],195,195,195); 
+   setColor(lamps[4][2],195,195,195); 
+   setColor(lamps[6][2],195,195,195); 
+   setColor(lamps[7][2],243,222,243); 
+   setColor(lamps[8][2],243,222,243); 
+   setColor(lamps[9][2],195,195,195); 
+
+   setColor(lamps[1][3],127,127,127);
+   setColor(lamps[2][3],195,195,195);
+   setColor(lamps[3][3],243,222,243);
+   setColor(lamps[4][3],243,222,243);
+   setColor(lamps[5][3],195,195,195);
+   setColor(lamps[6][3],243,222,243);
+   setColor(lamps[7][3],243,222,243);
+   setColor(lamps[8][3],243,222,243);
+   setColor(lamps[9][3],243,222,243);
+   setColor(lamps[10][3],195,195,195);
+
+   setColor(lamps[2][4],127,127,127);
+   setColor(lamps[3][4],195,195,195);
+   setColor(lamps[4][4],195,195,195);
+   setColor(lamps[5][4],195,195,195);
+   setColor(lamps[6][4],195,195,195);
+   setColor(lamps[7][4],195,195,195);
+   setColor(lamps[8][4],195,195,195);
+   
+   setColor(lamps[9][4],0,162,232);
+   setColor(lamps[3][5],0,162,232);
+   setColor(lamps[9][5],49,193,255);
+   setColor(lamps[3][6],49,193,255);
+   setColor(lamps[6][6],0,162,232);
+   
+  }else if(wea=="雪"){
+
+   setColor(lamps[7][1],195,195,195); 
+   setColor(lamps[8][1],195,195,195); 
+
+   setColor(lamps[3][2],195,195,195); 
+   setColor(lamps[4][2],195,195,195); 
+   setColor(lamps[6][2],195,195,195); 
+   setColor(lamps[7][2],243,222,243); 
+   setColor(lamps[8][2],243,222,243); 
+   setColor(lamps[9][2],195,195,195); 
+
+   setColor(lamps[1][3],127,127,127);
+   setColor(lamps[2][3],195,195,195);
+   setColor(lamps[3][3],243,222,243);
+   setColor(lamps[4][3],243,222,243);
+   setColor(lamps[5][3],195,195,195);
+   setColor(lamps[6][3],243,222,243);
+   setColor(lamps[7][3],243,222,243);
+   setColor(lamps[8][3],243,222,243);
+   setColor(lamps[9][3],243,222,243);
+   setColor(lamps[10][3],195,195,195);
+
+   setColor(lamps[2][4],127,127,127);
+   setColor(lamps[3][4],195,195,195);
+   setColor(lamps[4][4],195,195,195);
+   setColor(lamps[5][4],195,195,195);
+   setColor(lamps[6][4],195,195,195);
+   setColor(lamps[7][4],195,195,195);
+   setColor(lamps[8][4],195,195,195);
+   
+   setColor(lamps[9][4],239,94,98);
+   setColor(lamps[3][5],239,94,98);
+   setColor(lamps[9][5],239,94,98);
+   setColor(lamps[3][6],239,94,98);
+   setColor(lamps[6][6],239,94,98);
+   
+  }else if(wea=="阴"){
+
+   setColor(lamps[7][1],239,94,98); 
+   setColor(lamps[8][1],239,94,98); 
+
+   setColor(lamps[3][2],239,94,98); 
+   setColor(lamps[4][2],239,94,98); 
+   setColor(lamps[6][2],239,94,98); 
+   setColor(lamps[7][2],239,94,98); 
+   setColor(lamps[8][2],239,94,98); 
+   setColor(lamps[9][2],239,94,98); 
+
+   setColor(lamps[1][3],239,94,98);
+   setColor(lamps[2][3],239,94,98);
+   setColor(lamps[3][3],239,94,98);
+   setColor(lamps[4][3],239,94,98);
+   setColor(lamps[5][3],239,94,98);
+   setColor(lamps[6][3],239,94,98);
+   setColor(lamps[7][3],239,94,98);
+   setColor(lamps[8][3],239,94,98);
+   setColor(lamps[9][3],239,94,98);
+   setColor(lamps[10][3],239,94,98);
+
+   setColor(lamps[2][4],239,94,98);
+   setColor(lamps[3][4],239,94,98);
+   setColor(lamps[4][4],239,94,98);
+   setColor(lamps[5][4],239,94,98);
+   setColor(lamps[6][4],239,94,98);
+   setColor(lamps[7][4],239,94,98);
+   setColor(lamps[8][4],239,94,98);
+   
+  }else{ //晴
+
+    setColor(lamps[2][0],255,100,6);
+    setColor(lamps[5][0],255,100,6);
+
+    setColor(lamps[2][2],255,100,6);
+    setColor(lamps[3][2],255,100,6);
+    setColor(lamps[4][2],255,100,6);
+    setColor(lamps[5][2],255,100,6);
+    setColor(lamps[2][3],255,100,6);
+    setColor(lamps[3][3],255,100,6);
+    setColor(lamps[4][3],255,100,6);
+    setColor(lamps[5][3],255,100,6);
+    setColor(lamps[2][4],255,100,6);
+    setColor(lamps[3][4],255,100,6);
+    setColor(lamps[4][4],255,100,6);
+    setColor(lamps[5][4],255,100,6);
+    setColor(lamps[2][5],255,100,6);
+    setColor(lamps[3][5],255,100,6);
+    setColor(lamps[4][5],255,100,6);
+    setColor(lamps[5][5],255,100,6);
+
+    setColor(lamps[2][7],255,100,6);
+    setColor(lamps[5][7],255,100,6);
+
+    setColor(lamps[0][2],255,100,6);
+    setColor(lamps[0][5],255,100,6);
+
+    setColor(lamps[7][2],255,100,6);
+    setColor(lamps[7][5],255,100,6);
+  }
 }
 
 //数值 显示位置
@@ -254,8 +583,26 @@ void Numbr(int num,int x,int y){
   }
 }
 
+//网络连接中
+void connectlogo(){
+
+    pixels.clear();
+
+    setColor(lamps[11][4],0,162,232);
+
+    setColor(lamps[13][4],0,162,232);
+
+    setColor(lamps[15][4],0,162,232);
+
+    setColor(lamps[17][4],0,162,232);
+
+    setColor(lamps[19][4],0,162,232);
+}
+
 //无网络显示
-void noWifi(){
+void noWifilogo(){
+
+    pixels.clear();
 
     setColor(lamps[13][3],0,162,232);
     setColor(lamps[13][4],0,162,232);
@@ -272,7 +619,7 @@ void noWifi(){
 
 //显示logo
 int logoindex = 1;
-void logo(){
+void timelogo(){
 
   switch(logoindex){
 
@@ -448,6 +795,7 @@ void logo(){
   if(logoindex==5)logoindex=1;
 }
 
+//亮灯
 void setColor(int n,int r,int g,int b){
 
    pixels.setPixelColor(n, r, g, b,100);
