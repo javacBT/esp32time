@@ -19,7 +19,7 @@ WebServer server(80);
 
 #define NUMPIXELS 256
 
-#define DELAYVAL 1000 * 30
+#define DELAYVAL 1000 * 20
 
 int lamps[32][8]; //因为8*32灯是蛇形排列 所以要转换一下
 
@@ -34,6 +34,7 @@ DynamicJsonDocument doc(1024);
 
 String wea = ""; //天气
 int tem = 0; //温度
+int sD = 0; //湿度
 
 void setup() {
 
@@ -66,10 +67,16 @@ void loop() {
 
     showWeather();
     showJudge = 2;
-   }else{
+    
+   }else if(showJudge==2){
 
-    timeDisplay();
+    humidity();
+    showJudge = 3;
+    
+   }else {
+
     showJudge = 1;
+    timeDisplay();
    }
   
    delay(DELAYVAL);
@@ -215,13 +222,15 @@ void httpGet(){
     wea = httpWea;
     tem = (int)obj["tem"];
     tem = tem%100;
-    
+    sD = (int)obj["sD"];
+    sD = sD%100;
   }
 
   http.end();
 }
 
 //获取时间
+int H=0;
 void timeDisplay(){
 
   time_t now ;
@@ -229,23 +238,84 @@ void timeDisplay(){
   time(&now) ;
   tm_now = localtime(&now) ;
   
-  int hour = tm_now->tm_hour;
-  int mins = tm_now->tm_min;
+  int hour = tm_now->tm_hour; //时
+  int mins = tm_now->tm_min;  //分
+  int wday = tm_now->tm_wday; //周
 
-  //规定时间请求获取天气
-  if(mins<=1 && (hour ==22 || hour==18 || hour==12 || hour==4)){
+  //每小时请求一次天气
+  if(H!=hour){
 
-    httpGet();
+      H = hour;
+      httpGet();
   }
 
   pixels.clear();
   timelogo();
 
-  Numbr(hour/10,11,2);
-  Numbr(hour%10,15,2);
-  Numbr(-1,19,2);
-  Numbr(mins/10,21,2);
-  Numbr(mins%10,25,2);
+  Numbr(hour/10,11,1);
+  Numbr(hour%10,15,1);
+  Numbr(-1,19,1);
+  Numbr(mins/10,21,1);
+  Numbr(mins%10,25,1);
+
+  wdayDisplay(wday);
+}
+
+//显示周几
+void wdayDisplay(int wday){
+
+  setColor(lamps[11][7],255,100,6);
+  setColor(lamps[12][7],255,100,6);
+
+  setColor(lamps[14][7],255,100,6);
+  setColor(lamps[15][7],255,100,6);
+
+  setColor(lamps[17][7],255,100,6);
+  setColor(lamps[18][7],255,100,6);
+
+  setColor(lamps[20][7],255,100,6);
+  setColor(lamps[21][7],255,100,6);
+
+  setColor(lamps[23][7],255,100,6);
+  setColor(lamps[24][7],255,100,6);
+
+  setColor(lamps[26][7],255,100,6);
+  setColor(lamps[27][7],255,100,6);
+
+  setColor(lamps[29][7],255,100,6);
+  setColor(lamps[30][7],255,100,6);
+
+  switch(wday){
+
+      case 1:
+        setColor(lamps[11][7],219,0,5);
+        setColor(lamps[12][7],219,0,5);
+        break;
+      case 2:
+        setColor(lamps[14][7],219,0,5);
+        setColor(lamps[15][7],219,0,5);
+        break;
+      case 3:
+        setColor(lamps[17][7],219,0,5);
+        setColor(lamps[18][7],219,0,5);
+        break;
+      case 4:
+        setColor(lamps[20][7],219,0,5);
+        setColor(lamps[21][7],219,0,5);
+        break;
+      case 5:
+        setColor(lamps[23][7],219,0,5);
+        setColor(lamps[24][7],219,0,5);
+        break;
+      case 6:
+        setColor(lamps[26][7],219,0,5);
+        setColor(lamps[27][7],219,0,5);
+        break;
+      case 0:
+        setColor(lamps[29][7],219,0,5);
+        setColor(lamps[30][7],219,0,5);
+        break;
+  }
 }
 
 //显示温度
@@ -445,6 +515,65 @@ void showWeather(){
     setColor(lamps[7][2],255,100,6);
     setColor(lamps[7][5],255,100,6);
   }
+}
+
+//湿度显示
+void humidity(){
+
+  pixels.clear();
+
+  //气温
+  int sD1 = sD/10;
+  int sD2 = sD%10;
+
+    Numbr(sD1,11,2);
+    Numbr(sD2,15,2);
+    
+    setColor(lamps[20][2],153,217,234);
+    setColor(lamps[22][2],153,217,234);
+    setColor(lamps[22][3],153,217,234);
+    setColor(lamps[21][4],153,217,234);
+    setColor(lamps[20][5],153,217,234);
+    setColor(lamps[20][6],153,217,234);
+    setColor(lamps[22][6],153,217,234);
+
+
+    
+
+    setColor(lamps[4][0],153,217,234);
+    
+    setColor(lamps[4][1],153,217,234);
+
+    setColor(lamps[3][2],239,94,98);
+    setColor(lamps[4][2],239,94,98);
+    setColor(lamps[5][2],153,217,234);
+
+    setColor(lamps[3][3],239,94,98);
+    setColor(lamps[4][3],153,217,234);
+    setColor(lamps[5][3],153,217,234);
+
+    setColor(lamps[2][4],239,94,98);
+    setColor(lamps[3][4],153,217,234);
+    setColor(lamps[4][4],153,217,234);
+    setColor(lamps[5][4],153,217,234);
+    setColor(lamps[6][4],0,162,232);
+    
+    setColor(lamps[2][5],153,217,234);
+    setColor(lamps[3][5],153,217,234);
+    setColor(lamps[4][5],153,217,234);
+    setColor(lamps[5][5],153,217,234);
+    setColor(lamps[6][5],0,162,232);
+    
+    setColor(lamps[2][6],153,217,234);
+    setColor(lamps[3][6],153,217,234);
+    setColor(lamps[4][6],153,217,234);
+    setColor(lamps[5][6],0,162,232);
+    setColor(lamps[6][6],0,162,232);
+    
+    setColor(lamps[3][7],0,162,232);
+    setColor(lamps[4][7],0,162,232);
+    setColor(lamps[5][7],0,162,232);
+    
 }
 
 //数值 显示位置
